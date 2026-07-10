@@ -9,11 +9,43 @@ import 'package:flutterswift/features/clipboard/clipboard_notifier.dart';
 import 'package:flutterswift/features/downloader/downloads_notifier.dart';
 import 'package:flutterswift/models/clipboard_item.dart';
 
-class ClipboardScreen extends ConsumerWidget {
+class ClipboardScreen extends ConsumerStatefulWidget {
   const ClipboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ClipboardScreen> createState() => _ClipboardScreenState();
+}
+
+class _ClipboardScreenState extends ConsumerState<ClipboardScreen> {
+  final Set<String> _confirmDeleteIds = {};
+  bool _confirmClearAll = false;
+
+  void _handleDelete(String id) {
+    if (_confirmDeleteIds.contains(id)) {
+      ref.read(clipboardProvider.notifier).removeItem(id);
+      setState(() => _confirmDeleteIds.remove(id));
+    } else {
+      setState(() => _confirmDeleteIds.add(id));
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _confirmDeleteIds.remove(id));
+      });
+    }
+  }
+
+  void _handleClearAll() {
+    if (_confirmClearAll) {
+      ref.read(clipboardProvider.notifier).clearAll();
+      setState(() => _confirmClearAll = false);
+    } else {
+      setState(() => _confirmClearAll = true);
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _confirmClearAll = false);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final isDark = MediaQuery.of(context).platformBrightness == Brightness.dark;
     final items = ref.watch(clipboardProvider);
 
@@ -32,10 +64,14 @@ class ClipboardScreen extends ConsumerWidget {
             actions: [
               if (items.isNotEmpty)
                 CupertinoButton(
-                  child: const Text('Clear All',
-                      style: TextStyle(color: AppColors.systemRed)),
-                  onPressed: () =>
-                      ref.read(clipboardProvider.notifier).clearAll(),
+                  child: Text(
+                    _confirmClearAll ? 'Tap again to clear' : 'Clear All',
+                    style: TextStyle(
+                      color: _confirmClearAll ? AppColors.systemRed : AppColors.darkSecondaryLabel,
+                      fontWeight: _confirmClearAll ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                  onPressed: _handleClearAll,
                 ),
               CupertinoButton(
                 child: const Icon(CupertinoIcons.arrow_clockwise),
@@ -52,13 +88,13 @@ class ClipboardScreen extends ConsumerWidget {
                 (ctx, i) => _ClipboardItemRow(
                   item: items[i],
                   isDark: isDark,
+                  isConfirmDelete: _confirmDeleteIds.contains(items[i].id),
                   onCopy: () => _copy(context, items[i].content),
                   onDownload: items[i].type == ClipboardItemType.downloadLink ||
                           items[i].type == ClipboardItemType.url
                       ? () => _download(context, ref, items[i])
                       : null,
-                  onDelete: () =>
-                      ref.read(clipboardProvider.notifier).removeItem(items[i].id),
+                  onDelete: () => _handleDelete(items[i].id),
                 ).animate().fadeIn(duration: 250.ms).slideX(begin: 0.04, end: 0),
                 childCount: items.length,
               ),
@@ -134,6 +170,7 @@ class _EmptyClipboard extends StatelessWidget {
 class _ClipboardItemRow extends StatelessWidget {
   final ClipboardItem item;
   final bool isDark;
+  final bool isConfirmDelete;
   final VoidCallback onCopy;
   final VoidCallback? onDownload;
   final VoidCallback onDelete;
@@ -141,6 +178,7 @@ class _ClipboardItemRow extends StatelessWidget {
   const _ClipboardItemRow({
     required this.item,
     required this.isDark,
+    this.isConfirmDelete = false,
     required this.onCopy,
     required this.onDownload,
     required this.onDelete,
@@ -225,7 +263,29 @@ class _ClipboardItemRow extends StatelessWidget {
                     const Spacer(),
                     GestureDetector(
                       onTap: onDelete,
-                      child: const Icon(CupertinoIcons.trash, size: 18, color: AppColors.systemRed),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isConfirmDelete ? AppColors.systemRed.withAlpha(30) : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              isConfirmDelete ? CupertinoIcons.trash_fill : CupertinoIcons.trash,
+                              size: 18,
+                              color: isConfirmDelete ? AppColors.systemRed : AppColors.darkSecondaryLabel,
+                            ),
+                            if (isConfirmDelete) ...[
+                              const SizedBox(width: 4),
+                              Text('Confirm',
+                                  style: AppTypography.footnote(context,
+                                      color: AppColors.systemRed)),
+                            ],
+                          ],
+                        ),
+                      ),
                     ),
                   ],
                 ),

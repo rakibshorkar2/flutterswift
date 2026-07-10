@@ -66,10 +66,18 @@ class ProxyScreen extends ConsumerWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _AddProxySheet(
-        isDark: isDark,
-        onAdd: (proxy) =>
-            ref.read(proxiesProvider.notifier).addProxy(proxy),
+      useSafeArea: true,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) => _AddProxySheet(
+          isDark: isDark,
+          scrollController: scrollController,
+          onAdd: (proxy) =>
+              ref.read(proxiesProvider.notifier).addProxy(proxy),
+        ),
       ),
     );
   }
@@ -250,9 +258,10 @@ class _SmallButton extends StatelessWidget {
 
 class _AddProxySheet extends StatefulWidget {
   final bool isDark;
+  final ScrollController? scrollController;
   final void Function(ProxyConfig) onAdd;
 
-  const _AddProxySheet({required this.isDark, required this.onAdd});
+  const _AddProxySheet({required this.isDark, this.scrollController, required this.onAdd});
 
   @override
   State<_AddProxySheet> createState() => _AddProxySheetState();
@@ -279,22 +288,40 @@ class _AddProxySheetState extends State<_AddProxySheet> {
   @override
   Widget build(BuildContext context) {
     final isDark = widget.isDark;
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 36),
-            decoration: BoxDecoration(
-              color: isDark ? AppColors.glassBgDark : AppColors.glassBgLight,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.glassBgDark : AppColors.glassBgLight,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            border: Border(
+              top: BorderSide(
+                color: isDark ? AppColors.glassBorderDark : AppColors.glassBorderLight,
+                width: 1.0,
+              ),
+            ),
+          ),
+          child: SingleChildScrollView(
+            controller: widget.scrollController,
+            padding: EdgeInsets.only(
+              left: 20, right: 20, top: 20,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 36,
             ),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Center(
+                  child: Container(
+                    width: 36, height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: isDark ? AppColors.darkSecondaryLabel : AppColors.lightSecondaryLabel,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
                 Text('Add Proxy',
                     style: AppTypography.headline(context,
                         color: isDark ? AppColors.darkLabel : AppColors.lightLabel)),
