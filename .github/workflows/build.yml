@@ -28,6 +28,8 @@ jobs:
         run: |
           flutter build ios --release --no-codesign \
             --build-name=1.0.0 --build-number=${{ github.run_number }}
+        env:
+          SWIFT_STRICT_CONCURRENCY: minimal
 
       - name: Package IPA
         run: |
