@@ -1,1 +1,6 @@
 #include "Generated.xcconfig"
+
+// Unsigned build for sideloading — no Apple Developer account needed
+CODE_SIGNING_ALLOWED = NO
+CODE_SIGNING_REQUIRED = NO
+DEVELOPMENT_TEAM =
