@@ -1,0 +1,191 @@
+name: Build DirXplore Pro IPA
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: 'stable'
+  APP_NAME: DirXplorePro
+
+jobs:
+  build-ipa:
+    name: Build Unsigned IPA
+    runs-on: macos-15
+
+    steps:
+      # ───────────────────────────────────────────────
+      # 1. Checkout
+      # ───────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ───────────────────────────────────────────────
+      # 2. Select Xcode
+      # ───────────────────────────────────────────────
+      - name: Select Xcode
+        run: |
+          # Prefer Xcode 26 (Xcode 18 beta for iOS 18.5); fall back to latest available.
+          if ls /Applications/ | grep -q "Xcode_26"; then
+            XCODE_PATH=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          elif ls /Applications/ | grep -q "Xcode_18"; then
+            XCODE_PATH=$(ls -d /Applications/Xcode_18*.app 2>/dev/null | sort -V | tail -1)
+          else
+            XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          fi
+          echo "Selected Xcode: $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH"
+          xcodebuild -version
+
+      # ───────────────────────────────────────────────
+      # 3. Cache Flutter SDK
+      # ───────────────────────────────────────────────
+      - name: Cache Flutter SDK
+        uses: actions/cache@v4
+        with:
+          path: ~/flutter
+          key: flutter-${{ env.FLUTTER_VERSION }}-${{ runner.os }}-${{ hashFiles('pubspec.yaml') }}
+          restore-keys: |
+            flutter-${{ env.FLUTTER_VERSION }}-${{ runner.os }}-
+
+      # ───────────────────────────────────────────────
+      # 4. Set up Flutter
+      # ───────────────────────────────────────────────
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      # ───────────────────────────────────────────────
+      # 5. Cache Pub packages
+      # ───────────────────────────────────────────────
+      - name: Cache Pub packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.yaml', 'pubspec.lock') }}
+          restore-keys: |
+            pub-${{ runner.os }}-
+
+      # ───────────────────────────────────────────────
+      # 6. Flutter pub get
+      # ───────────────────────────────────────────────
+      - name: Flutter pub get
+        run: flutter pub get
+
+      # ───────────────────────────────────────────────
+      # 7. Flutter analyze
+      # ───────────────────────────────────────────────
+      - name: Flutter analyze
+        run: flutter analyze
+
+      # ───────────────────────────────────────────────
+      # 8. Cache CocoaPods
+      # ───────────────────────────────────────────────
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Pods
+            ios/.symlinks
+          key: pods-${{ runner.os }}-${{ hashFiles('ios/Podfile', 'ios/Podfile.lock') }}
+          restore-keys: |
+            pods-${{ runner.os }}-
+
+      # ───────────────────────────────────────────────
+      # 9. CocoaPods install
+      # ───────────────────────────────────────────────
+      - name: Pod install
+        working-directory: ios
+        run: pod install --repo-update
+
+      # ───────────────────────────────────────────────
+      # 10. Cache DerivedData
+      # ───────────────────────────────────────────────
+      - name: Cache DerivedData
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: derived-${{ runner.os }}-${{ hashFiles('ios/**/*.swift', 'lib/**/*.dart') }}
+          restore-keys: |
+            derived-${{ runner.os }}-
+
+      # ───────────────────────────────────────────────
+      # 11. Flutter build iOS (no codesign)
+      # ───────────────────────────────────────────────
+      - name: Build iOS (unsigned)
+        run: |
+          flutter build ios \
+            --release \
+            --no-codesign \
+            --build-name=1.0.0 \
+            --build-number=${{ github.run_number }}
+
+      # ───────────────────────────────────────────────
+      # 12. Archive
+      # ───────────────────────────────────────────────
+      - name: Archive (xcodebuild)
+        run: |
+          xcodebuild archive \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -archivePath /tmp/${{ env.APP_NAME }}.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            | xcpretty || true
+
+      # ───────────────────────────────────────────────
+      # 13. Export unsigned IPA
+      # ───────────────────────────────────────────────
+      - name: Export IPA
+        run: |
+          mkdir -p /tmp/ipa_export
+          # Copy the app from the archive and wrap it in a Payload
+          APP_PATH="/tmp/${{ env.APP_NAME }}.xcarchive/Products/Applications/Runner.app"
+          mkdir -p /tmp/ipa_export/Payload
+          cp -r "$APP_PATH" /tmp/ipa_export/Payload/
+          cd /tmp/ipa_export
+          zip -r "${{ env.APP_NAME }}.ipa" Payload
+          echo "IPA created at: /tmp/ipa_export/${{ env.APP_NAME }}.ipa"
+
+      # ───────────────────────────────────────────────
+      # 14. Upload artifact
+      # ───────────────────────────────────────────────
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-${{ github.run_number }}
+          path: /tmp/ipa_export/${{ env.APP_NAME }}.ipa
+          retention-days: 30
+
+  # ───────────────────────────────────────────────────
+  # Clean workflow (manual trigger)
+  # ───────────────────────────────────────────────────
+  clean:
+    name: Clean caches
+    runs-on: macos-15
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Clean Flutter build
+        run: flutter clean || true
+
+      - name: Remove DerivedData
+        run: rm -rf ~/Library/Developer/Xcode/DerivedData || true
+
+      - name: Remove Pods
+        run: rm -rf ios/Pods ios/Podfile.lock || true
