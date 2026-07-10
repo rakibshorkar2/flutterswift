@@ -372,6 +372,8 @@
 				SUPPORTED_PLATFORMS = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALIDATE_PRODUCT = YES;
+				DEVELOPMENT_TEAM = "";
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Profile;
 		};
@@ -393,6 +395,8 @@
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
+				DEVELOPMENT_TEAM = "";
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Profile;
 		};
@@ -410,6 +414,8 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Runner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Runner";
+				DEVELOPMENT_TEAM = "";
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Debug;
 		};
@@ -425,6 +431,8 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Runner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Runner";
+				DEVELOPMENT_TEAM = "";
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Release;
 		};
@@ -440,6 +448,8 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Runner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Runner";
+				DEVELOPMENT_TEAM = "";
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Profile;
 		};
@@ -497,6 +507,8 @@
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				DEVELOPMENT_TEAM = "";
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Debug;
 		};
@@ -551,6 +563,8 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALIDATE_PRODUCT = YES;
+				DEVELOPMENT_TEAM = "";
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Release;
 		};
@@ -573,6 +587,8 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
+				DEVELOPMENT_TEAM = "";
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Debug;
 		};
@@ -594,6 +610,8 @@
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
+				DEVELOPMENT_TEAM = "";
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Release;
 		};
