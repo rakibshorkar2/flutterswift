@@ -92,18 +92,26 @@ class DownloaderScreen extends ConsumerWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _AddDownloadSheet(
-        urlController: urlController,
-        onAdd: (url) {
-          final fileName = url.split('/').last.isNotEmpty
-              ? url.split('/').last
-              : 'download_${DateTime.now().millisecondsSinceEpoch}';
-          ref.read(downloadsProvider.notifier).addDownload(
-                url: url,
-                fileName: fileName,
-              );
-          Navigator.pop(context);
-        },
+      useSafeArea: true,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.4,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) => _AddDownloadSheet(
+          urlController: urlController,
+          scrollController: scrollController,
+          onAdd: (url) {
+            final fileName = url.split('/').last.isNotEmpty
+                ? url.split('/').last
+                : 'download_${DateTime.now().millisecondsSinceEpoch}';
+            ref.read(downloadsProvider.notifier).addDownload(
+                  url: url,
+                  fileName: fileName,
+                );
+            Navigator.pop(context);
+          },
+        ),
       ),
     );
   }
@@ -333,35 +341,52 @@ class _ActionButton extends StatelessWidget {
 
 class _AddDownloadSheet extends StatelessWidget {
   final TextEditingController urlController;
+  final ScrollController? scrollController;
   final void Function(String url) onAdd;
 
-  const _AddDownloadSheet({required this.urlController, required this.onAdd});
+  const _AddDownloadSheet({
+    required this.urlController,
+    this.scrollController,
+    required this.onAdd,
+  });
 
   @override
   Widget build(BuildContext context) {
     final isDark = MediaQuery.of(context).platformBrightness == Brightness.dark;
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 36),
-            decoration: BoxDecoration(
-              color: isDark ? AppColors.glassBgDark : AppColors.glassBgLight,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-              border: Border(
-                top: BorderSide(
-                  color: isDark ? AppColors.glassBorderDark : AppColors.glassBorderLight,
-                  width: 1.0,
-                ),
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.glassBgDark : AppColors.glassBgLight,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            border: Border(
+              top: BorderSide(
+                color: isDark ? AppColors.glassBorderDark : AppColors.glassBorderLight,
+                width: 1.0,
               ),
             ),
+          ),
+          child: SingleChildScrollView(
+            controller: scrollController,
+            padding: EdgeInsets.only(
+              left: 20, right: 20, top: 20,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 36,
+            ),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Center(
+                  child: Container(
+                    width: 36, height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: isDark ? AppColors.darkSecondaryLabel : AppColors.lightSecondaryLabel,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
                 Text(
                   'Add Download',
                   style: AppTypography.headline(

@@ -88,7 +88,7 @@ class _NavigationShellState extends State<NavigationShell> with SingleTickerProv
                     sigmaY: GlassEffects.blurSigmaY,
                   ),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
                     decoration: BoxDecoration(
                       color: isDark ? AppColors.glassBgDark : AppColors.glassBgLight,
                       borderRadius: BorderRadius.circular(32),
@@ -106,7 +106,7 @@ class _NavigationShellState extends State<NavigationShell> with SingleTickerProv
                       ],
                     ),
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
                         _buildNavItem(
                           index: 0,
@@ -166,7 +166,7 @@ class _NavigationShellState extends State<NavigationShell> with SingleTickerProv
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         curve: AppSprings.interactiveSpring,
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 14),
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
         decoration: BoxDecoration(
           color: isSelected
               ? (isDark ? const Color(0x260A84FF) : const Color(0x1F007AFF))
@@ -183,14 +183,14 @@ class _NavigationShellState extends State<NavigationShell> with SingleTickerProv
               child: Icon(
                 icon,
                 color: isSelected ? accentColor : inactiveColor,
-                size: 24,
+                size: 22,
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 2),
             Text(
               label,
               style: AppTypography.sfPro(
-                fontSize: 10,
+                fontSize: 9,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                 color: isSelected ? accentColor : inactiveColor,
               ),
