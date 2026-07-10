@@ -225,7 +225,7 @@ public actor BackgroundDownloader: NSObject {
     /// folder in the Files app ("On My iPhone" → "DirXplore Pro").
     private static func defaultDestination(for fileName: String) -> String {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let appFolder = docs.appendingPathComponent("DirXplore", isDirectory: true)
+        let appFolder = docs.appendingPathComponent("DirXplore Pro", isDirectory: true)
         try? FileManager.default.createDirectory(at: appFolder, withIntermediateDirectories: true)
         return appFolder.appendingPathComponent(fileName).path
     }

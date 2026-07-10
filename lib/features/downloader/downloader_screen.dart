@@ -86,6 +86,36 @@ class DownloaderScreen extends ConsumerWidget {
     );
   }
 
+  /// Extract a sensible filename from any URL format, including signed
+  /// Cloudflare R2 links with query‑based content‑disposition parameters.
+  static String _extractFileName(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return 'download_${DateTime.now().millisecondsSinceEpoch}';
+
+    // 1. Try to get filename from query param "filename" or "response-content-disposition"
+    final filenameParam = uri.queryParameters['filename'];
+    if (filenameParam != null && filenameParam.isNotEmpty) return filenameParam;
+
+    final disposition = uri.queryParameters['response-content-disposition'];
+    if (disposition != null) {
+      final match = RegExp(r'''filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?''')
+          .firstMatch(disposition);
+      if (match != null) return match.group(1)!;
+    }
+
+    // 2. Strip query string and take last path segment
+    final path = uri.path; // path excludes the query
+    if (path.isNotEmpty) {
+      final segments = path.split('/');
+      final last = segments.where((s) => s.isNotEmpty).lastOrNull;
+      if (last != null && last.contains('.')) {
+        return Uri.decodeComponent(last);
+      }
+    }
+
+    return 'download_${DateTime.now().millisecondsSinceEpoch}';
+  }
+
   void _showAddDownloadSheet(BuildContext context, WidgetRef ref) {
     final urlController = TextEditingController();
     showModalBottomSheet(
@@ -102,9 +132,7 @@ class DownloaderScreen extends ConsumerWidget {
           urlController: urlController,
           scrollController: scrollController,
           onAdd: (url) {
-            final fileName = url.split('/').last.isNotEmpty
-                ? url.split('/').last
-                : 'download_${DateTime.now().millisecondsSinceEpoch}';
+            final fileName = _extractFileName(url);
             ref.read(downloadsProvider.notifier).addDownload(
                   url: url,
                   fileName: fileName,
