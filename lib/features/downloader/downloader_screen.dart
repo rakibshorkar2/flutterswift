@@ -5,7 +5,10 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutterswift/core/theme.dart';
 import 'package:flutterswift/features/downloader/downloads_notifier.dart';
+import 'package:flutterswift/features/downloader/library_screen.dart';
 import 'package:flutterswift/models/download_task.dart';
+
+enum _ViewMode { downloads, library }
 
 class DownloaderScreen extends ConsumerStatefulWidget {
   const DownloaderScreen({super.key});
@@ -18,6 +21,7 @@ class _DownloaderScreenState extends ConsumerState<DownloaderScreen> {
   final _searchController = TextEditingController();
   bool _showSearch = false;
   bool _showFilters = false;
+  _ViewMode _viewMode = _ViewMode.downloads;
 
   @override
   void dispose() {
@@ -63,24 +67,47 @@ class _DownloaderScreenState extends ConsumerState<DownloaderScreen> {
                     style: AppTypography.body(context,
                         color: isDark ? AppColors.darkLabel : AppColors.lightLabel),
                   )
-                : Text('Downloads',
-                    style: AppTypography.title1(context,
-                        color: isDark ? AppColors.darkLabel : AppColors.lightLabel)),
+                : _viewMode == _ViewMode.downloads
+                    ? Text('Downloads',
+                        style: AppTypography.title1(context,
+                            color: isDark ? AppColors.darkLabel : AppColors.lightLabel))
+                    : Text('Library',
+                        style: AppTypography.title1(context,
+                            color: isDark ? AppColors.darkLabel : AppColors.lightLabel)),
             actions: [
               CupertinoButton(
-                child: Icon(_showSearch ? CupertinoIcons.xmark_circle : CupertinoIcons.search),
-                onPressed: () => setState(() => _showSearch = !_showSearch),
+                padding: EdgeInsets.zero,
+                child: _viewMode == _ViewMode.downloads
+                    ? const Icon(CupertinoIcons.folder)
+                    : const Icon(CupertinoIcons.arrow_down_circle),
+                onPressed: () => setState(() {
+                  _viewMode = _viewMode == _ViewMode.downloads
+                      ? _ViewMode.library
+                      : _ViewMode.downloads;
+                }),
               ),
-              CupertinoButton(
-                child: const Icon(CupertinoIcons.slider_horizontal_3),
-                onPressed: () => setState(() => _showFilters = !_showFilters),
-              ),
-              CupertinoButton(
-                child: const Icon(CupertinoIcons.plus_circle),
-                onPressed: () => _showAddDownloadSheet(context, ref),
-              ),
+              if (_viewMode == _ViewMode.downloads) ...[
+                CupertinoButton(
+                  child: Icon(_showSearch ? CupertinoIcons.xmark_circle : CupertinoIcons.search),
+                  onPressed: () => setState(() => _showSearch = !_showSearch),
+                ),
+                CupertinoButton(
+                  child: const Icon(CupertinoIcons.slider_horizontal_3),
+                  onPressed: () => setState(() => _showFilters = !_showFilters),
+                ),
+                CupertinoButton(
+                  child: const Icon(CupertinoIcons.plus_circle),
+                  onPressed: () => _showAddDownloadSheet(context, ref),
+                ),
+              ],
             ],
           ),
+          // --- Library View ---
+          if (_viewMode == _ViewMode.library) ...[
+            SliverFillRemaining(
+              child: _LibraryView(isDark: isDark),
+            ),
+          ] else ...[
           // --- Filter Chips ---
           if (_showFilters)
             SliverToBoxAdapter(
@@ -139,6 +166,7 @@ class _DownloaderScreenState extends ConsumerState<DownloaderScreen> {
               ),
             ],
             const SliverToBoxAdapter(child: SizedBox(height: 120)),
+          ],
           ],
         ],
       ),
@@ -202,6 +230,18 @@ class _DownloaderScreenState extends ConsumerState<DownloaderScreen> {
     }
 
     return 'download_${DateTime.now().millisecondsSinceEpoch}';
+  }
+}
+
+// MARK: - Library View (embedded file browser)
+
+class _LibraryView extends ConsumerWidget {
+  final bool isDark;
+  const _LibraryView({required this.isDark});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return const LibraryScreen();
   }
 }
 

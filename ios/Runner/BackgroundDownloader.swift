@@ -515,12 +515,10 @@ public actor BackgroundDownloader: NSObject {
         }
     }
 
-    /// Returns a path inside Documents/DirXplore Pro/ so files appear under the app's folder.
+    /// Returns a path inside the categorized Downloads structure managed by StorageManager.
     public static func defaultDestination(for fileName: String) -> String {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let appFolder = docs.appendingPathComponent("DirXplore Pro", isDirectory: true)
-        try? FileManager.default.createDirectory(at: appFolder, withIntermediateDirectories: true)
-        return appFolder.appendingPathComponent(fileName).path
+        let url = StorageManager.shared.destinationPath(for: fileName)
+        return url.path
     }
 }
 

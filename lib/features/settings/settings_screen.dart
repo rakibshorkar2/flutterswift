@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutterswift/core/theme.dart';
+import 'package:flutterswift/features/downloader/files_notifier.dart';
 
 final _themeOverrideProvider = StateProvider<ThemeMode>((ref) => ThemeMode.system);
 final _downloadsLimitProvider = StateProvider<int>((ref) => 3);
@@ -159,8 +160,11 @@ class SettingsScreen extends ConsumerWidget {
                   const SizedBox(height: 20),
 
                   // ─── Storage ────────────────────────────────────
+                  _StorageSection(isDark: isDark),
+                  const SizedBox(height: 20),
+                  // ─── Clear Data ─────────────────────────────────
                   _SettingsGroup(
-                    label: 'Storage',
+                    label: 'Clear Data',
                     isDark: isDark,
                     children: [
                       _NavigationRow(
@@ -175,12 +179,6 @@ class SettingsScreen extends ConsumerWidget {
                         isDark: isDark,
                         onTap: () {},
                         destructive: true,
-                      ),
-                      _Divider(isDark: isDark),
-                      _NavigationRow(
-                        label: 'Backup & Restore',
-                        isDark: isDark,
-                        onTap: () {},
                       ),
                     ],
                   ),
@@ -459,6 +457,97 @@ class _NavigationRow extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+// MARK: - Storage Section
+
+class _StorageSection extends ConsumerWidget {
+  final bool isDark;
+  const _StorageSection({required this.isDark});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final storageAsync = ref.watch(storageInfoProvider);
+
+    return _SettingsGroup(
+      label: 'Storage',
+      isDark: isDark,
+      children: [
+        storageAsync.when(
+          loading: () => const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CupertinoActivityIndicator()),
+          ),
+          error: (_, __) => Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text('Could not load storage info',
+                style: AppTypography.footnote(context,
+                    color: AppColors.systemRed)),
+          ),
+          data: (info) => Column(
+            children: [
+              _InfoRow(
+                label: 'Used by DirXplore Pro',
+                value: _fmtBytes(info['usedBytes'] as int? ?? 0),
+                isDark: isDark,
+              ),
+              _Divider(isDark: isDark),
+              _InfoRow(
+                label: 'Files',
+                value: '${info['fileCount'] ?? 0}',
+                isDark: isDark,
+              ),
+              _Divider(isDark: isDark),
+              _InfoRow(
+                label: 'Folders',
+                value: '${info['folderCount'] ?? 0}',
+                isDark: isDark,
+              ),
+              _Divider(isDark: isDark),
+              _InfoRow(
+                label: 'Free Device Storage',
+                value: _fmtBytes(info['freeDeviceBytes'] as int? ?? 0),
+                isDark: isDark,
+              ),
+              _Divider(isDark: isDark),
+              _NavigationRow(
+                label: 'Recalculate Storage',
+                isDark: isDark,
+                onTap: () => ref.refresh(storageInfoProvider),
+              ),
+              _Divider(isDark: isDark),
+              _NavigationRow(
+                label: 'Browse Downloads in Files',
+                isDark: isDark,
+                onTap: () => _openFilesApp(context),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _fmtBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1048576) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1073741824) return '${(bytes / 1048576).toStringAsFixed(1)} MB';
+    return '${(bytes / 1073741824).toStringAsFixed(2)} GB';
+  }
+
+  void _openFilesApp(BuildContext context) {
+    final bridge = ref.read(fileBridgeProvider);
+    bridge.getRootDirectory().then((_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Open the Files app → On My iPhone → DirXplore Pro'),
+          backgroundColor: AppColors.darkAccentBlue,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    });
   }
 }
 
