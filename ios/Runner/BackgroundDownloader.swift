@@ -221,9 +221,13 @@ public actor BackgroundDownloader: NSObject {
         }
     }
 
+    /// Returns a path inside Documents/DirXplore/ so files appear under the app's
+    /// folder in the Files app ("On My iPhone" → "DirXplore Pro").
     private static func defaultDestination(for fileName: String) -> String {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return docs.appendingPathComponent(fileName).path
+        let appFolder = docs.appendingPathComponent("DirXplore", isDirectory: true)
+        try? FileManager.default.createDirectory(at: appFolder, withIntermediateDirectories: true)
+        return appFolder.appendingPathComponent(fileName).path
     }
 }
 

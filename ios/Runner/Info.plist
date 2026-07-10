@@ -27,6 +27,14 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 
+	<!-- File sharing — visible in Files app -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>DirXplore Pro saves downloaded files to a dedicated folder in the Files app.</string>
+
 	<!-- Background download mode -->
 	<key>UIBackgroundModes</key>
 	<array>
