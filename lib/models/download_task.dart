@@ -1,10 +1,18 @@
-/// Status of a download task.
+/// Extended status for the professional download engine.
 enum DownloadStatus {
-  queued,
+  idle,
+  connecting,
+  fetchingHeaders,
   downloading,
   paused,
+  queued,
   completed,
   failed,
+  retrying,
+  expired,
+  waiting,
+  verifying,
+  merging,
   cancelled,
 }
 
@@ -15,7 +23,7 @@ class DownloadTask {
   final String fileName;
   final String? destinationPath;
   final DownloadStatus status;
-  final double progress; // 0.0 to 1.0
+  final double progress;
   final double speedBytesPerSec;
   final int etaSeconds;
   final int totalBytes;
@@ -23,6 +31,14 @@ class DownloadTask {
   final DateTime createdAt;
   final DateTime? completedAt;
   final String? errorMessage;
+  final String mimeType;
+  final String fileExtension;
+  final String server;
+  final String etag;
+  final bool supportsResume;
+  final int retryCount;
+  final String category;
+  final String sourceDomain;
 
   const DownloadTask({
     required this.taskId,
@@ -38,6 +54,14 @@ class DownloadTask {
     required this.createdAt,
     this.completedAt,
     this.errorMessage,
+    this.mimeType = '',
+    this.fileExtension = '',
+    this.server = '',
+    this.etag = '',
+    this.supportsResume = false,
+    this.retryCount = 0,
+    this.category = 'other',
+    this.sourceDomain = '',
   });
 
   DownloadTask copyWith({
@@ -49,11 +73,18 @@ class DownloadTask {
     int? receivedBytes,
     DateTime? completedAt,
     String? errorMessage,
+    String? fileName,
+    String? mimeType,
+    String? server,
+    String? etag,
+    bool? supportsResume,
+    int? retryCount,
+    String? category,
   }) {
     return DownloadTask(
       taskId: taskId,
       url: url,
-      fileName: fileName,
+      fileName: fileName ?? this.fileName,
       destinationPath: destinationPath,
       status: status ?? this.status,
       progress: progress ?? this.progress,
@@ -64,10 +95,17 @@ class DownloadTask {
       createdAt: createdAt,
       completedAt: completedAt ?? this.completedAt,
       errorMessage: errorMessage ?? this.errorMessage,
+      mimeType: mimeType ?? this.mimeType,
+      fileExtension: fileExtension,
+      server: server ?? this.server,
+      etag: etag ?? this.etag,
+      supportsResume: supportsResume ?? this.supportsResume,
+      retryCount: retryCount ?? this.retryCount,
+      category: category ?? this.category,
+      sourceDomain: sourceDomain,
     );
   }
 
-  /// Parse from native bridge event map.
   factory DownloadTask.fromNativeEvent(Map<String, dynamic> map) {
     return DownloadTask(
       taskId: map['taskId'] as String,
@@ -80,45 +118,46 @@ class DownloadTask {
       etaSeconds: (map['eta'] as num?)?.toInt() ?? 0,
       totalBytes: (map['totalBytes'] as num?)?.toInt() ?? 0,
       receivedBytes: (map['receivedBytes'] as num?)?.toInt() ?? 0,
-      createdAt: DateTime.tryParse(map['createdAt'] as String? ?? '') ??
-          DateTime.now(),
-      completedAt: map['completedAt'] != null
-          ? DateTime.tryParse(map['completedAt'] as String)
-          : null,
+      createdAt: DateTime.tryParse(map['createdAt'] as String? ?? '') ?? DateTime.now(),
+      completedAt: map['completedAt'] != null ? DateTime.tryParse(map['completedAt'] as String) : null,
       errorMessage: map['errorMessage'] as String?,
+      mimeType: map['mimeType'] as String? ?? '',
+      fileExtension: map['fileExtension'] as String? ?? '',
+      server: map['server'] as String? ?? '',
+      etag: map['etag'] as String? ?? '',
+      supportsResume: map['supportsResume'] as bool? ?? false,
+      retryCount: (map['retryCount'] as num?)?.toInt() ?? 0,
+      category: map['category'] as String? ?? 'other',
+      sourceDomain: map['sourceDomain'] as String? ?? '',
     );
   }
 
-  /// Parse status string from native layer. Public for use by notifiers.
   static DownloadStatus parseStatus(String? status) {
     switch (status) {
-      case 'queued':
-        return DownloadStatus.queued;
-      case 'downloading':
-        return DownloadStatus.downloading;
-      case 'paused':
-        return DownloadStatus.paused;
-      case 'completed':
-        return DownloadStatus.completed;
-      case 'failed':
-        return DownloadStatus.failed;
-      case 'cancelled':
-        return DownloadStatus.cancelled;
-      default:
-        return DownloadStatus.queued;
+      case 'idle': return DownloadStatus.idle;
+      case 'connecting': return DownloadStatus.connecting;
+      case 'fetchingHeaders': return DownloadStatus.fetchingHeaders;
+      case 'downloading': return DownloadStatus.downloading;
+      case 'paused': return DownloadStatus.paused;
+      case 'queued': return DownloadStatus.queued;
+      case 'completed': return DownloadStatus.completed;
+      case 'failed': return DownloadStatus.failed;
+      case 'retrying': return DownloadStatus.retrying;
+      case 'expired': return DownloadStatus.expired;
+      case 'waiting': return DownloadStatus.waiting;
+      case 'verifying': return DownloadStatus.verifying;
+      case 'merging': return DownloadStatus.merging;
+      case 'cancelled': return DownloadStatus.cancelled;
+      default: return DownloadStatus.queued;
     }
   }
 
-  /// Human-readable formatted speed string.
   String get formattedSpeed {
     if (speedBytesPerSec < 1024) return '${speedBytesPerSec.toStringAsFixed(0)} B/s';
-    if (speedBytesPerSec < 1048576) {
-      return '${(speedBytesPerSec / 1024).toStringAsFixed(1)} KB/s';
-    }
+    if (speedBytesPerSec < 1048576) return '${(speedBytesPerSec / 1024).toStringAsFixed(1)} KB/s';
     return '${(speedBytesPerSec / 1048576).toStringAsFixed(1)} MB/s';
   }
 
-  /// Human-readable ETA string.
   String get formattedEta {
     if (etaSeconds <= 0) return '--';
     if (etaSeconds < 60) return '${etaSeconds}s';
@@ -126,7 +165,6 @@ class DownloadTask {
     return '${etaSeconds ~/ 3600}h ${(etaSeconds % 3600) ~/ 60}m';
   }
 
-  /// Human-readable file size string for received/total.
   String get formattedSize {
     String fmt(int bytes) {
       if (bytes < 1024) return '$bytes B';
@@ -134,7 +172,6 @@ class DownloadTask {
       if (bytes < 1073741824) return '${(bytes / 1048576).toStringAsFixed(1)} MB';
       return '${(bytes / 1073741824).toStringAsFixed(2)} GB';
     }
-
     return '${fmt(receivedBytes)} / ${fmt(totalBytes)}';
   }
 }

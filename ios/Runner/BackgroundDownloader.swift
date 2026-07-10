@@ -3,18 +3,19 @@ import OSLog
 
 private let logger = Logger(subsystem: "com.dirxplorerakib.pro", category: "BackgroundDownloader")
 
-/// Represents the state of a single download task.
+/// Extended download statuses for the professional engine.
 @objc public enum DXDownloadStatus: Int {
-    case queued, downloading, paused, completed, failed, cancelled
+    case idle, connecting, fetchingHeaders, downloading, paused, queued,
+         completed, failed, retrying, expired, waiting, verifying, merging, cancelled
 }
 
 /// Thread-safe model for a download task.
 @objc public class DXDownloadTask: NSObject {
     @objc public let taskId: String
     @objc public let url: String
-    @objc public let fileName: String
+    @objc public var fileName: String
     @objc public let destinationPath: String
-    @objc public var status: DXDownloadStatus = .queued
+    @objc public var status: DXDownloadStatus = .idle
     @objc public var progress: Double = 0.0
     @objc public var speedBytesPerSec: Double = 0.0
     @objc public var etaSeconds: Int = 0
@@ -23,6 +24,16 @@ private let logger = Logger(subsystem: "com.dirxplorerakib.pro", category: "Back
     @objc public var resumeData: Data?
     @objc public var errorMessage: String?
     @objc public let createdAt: Date
+    @objc public var completedAt: Date?
+    @objc public var mimeType: String = ""
+    @objc public var fileExtension: String = ""
+    @objc public var server: String = ""
+    @objc public var etag: String = ""
+    @objc public var supportsResume: Bool = false
+    @objc public var retryCount: Int = 0
+    @objc public var category: String = "other"
+    @objc public var sourceDomain: String = ""
+    @objc public var headers: [String: String]?
 
     private var speedSamples: [(date: Date, bytes: Int64)] = []
 
@@ -32,9 +43,36 @@ private let logger = Logger(subsystem: "com.dirxplorerakib.pro", category: "Back
         self.fileName = fileName
         self.destinationPath = destinationPath
         self.createdAt = Date()
+        if let host = URL(string: url)?.host {
+            self.sourceDomain = host
+        }
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        self.fileExtension = ext
+        self.category = Self.category(for: ext)
     }
 
-    /// Update speed using a moving average of the last 5 seconds.
+    /// Classify file extension into a category.
+    private static func category(for ext: String) -> String {
+        switch ext {
+        case "mkv", "mp4", "avi", "mov", "wmv", "flv", "webm", "m4v", "ts", "m2ts":
+            return "video"
+        case "mp3", "flac", "wav", "aac", "ogg", "wma", "m4a", "opus":
+            return "audio"
+        case "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "zst":
+            return "archive"
+        case "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "rtf":
+            return "document"
+        case "jpg", "jpeg", "png", "gif", "bmp", "webp", "svg", "heic", "avif":
+            return "image"
+        case "ipa", "apk", "dmg", "exe", "msi", "deb", "rpm":
+            return "app"
+        case "iso", "img":
+            return "disk"
+        default:
+            return "other"
+        }
+    }
+
     public func recordProgress(receivedBytes: Int64, totalBytes: Int64) {
         self.receivedBytes = receivedBytes
         self.totalBytes = totalBytes
@@ -42,7 +80,6 @@ private let logger = Logger(subsystem: "com.dirxplorerakib.pro", category: "Back
 
         let now = Date()
         speedSamples.append((date: now, bytes: receivedBytes))
-        // Keep only samples within the last 3 seconds
         speedSamples = speedSamples.filter { now.timeIntervalSince($0.date) <= 3.0 }
 
         if speedSamples.count >= 2,
@@ -62,11 +99,19 @@ private let logger = Logger(subsystem: "com.dirxplorerakib.pro", category: "Back
 
     public func statusString() -> String {
         switch status {
-        case .queued: return "queued"
+        case .idle: return "idle"
+        case .connecting: return "connecting"
+        case .fetchingHeaders: return "fetchingHeaders"
         case .downloading: return "downloading"
         case .paused: return "paused"
+        case .queued: return "queued"
         case .completed: return "completed"
         case .failed: return "failed"
+        case .retrying: return "retrying"
+        case .expired: return "expired"
+        case .waiting: return "waiting"
+        case .verifying: return "verifying"
+        case .merging: return "merging"
         case .cancelled: return "cancelled"
         @unknown default: return "unknown"
         }
@@ -85,24 +130,36 @@ private let logger = Logger(subsystem: "com.dirxplorerakib.pro", category: "Back
             "totalBytes": totalBytes,
             "receivedBytes": receivedBytes,
             "createdAt": ISO8601DateFormatter().string(from: createdAt),
+            "mimeType": mimeType,
+            "fileExtension": fileExtension,
+            "server": server,
+            "etag": etag,
+            "supportsResume": supportsResume,
+            "retryCount": retryCount,
+            "category": category,
+            "sourceDomain": sourceDomain,
+            "errorMessage": errorMessage ?? "",
         ]
-        if let err = errorMessage { dict["errorMessage"] = err }
+        if let completed = completedAt {
+            dict["completedAt"] = ISO8601DateFormatter().string(from: completed)
+        }
         return dict
     }
 }
 
-/// Manages URLSession background downloads with pause/resume support.
-/// This actor serializes all mutations to prevent data races (Swift 6).
+// MARK: - Professional Background Download Engine
+
 public actor BackgroundDownloader: NSObject {
     public static let shared = BackgroundDownloader()
 
     private static let sessionId = "com.dirxplorerakib.pro.bgdownload"
+    private let maxRetries = 3
 
     private var urlSession: URLSession!
     private var tasks: [String: DXDownloadTask] = [:]
     private var sessionTaskToTaskId: [Int: String] = [:]
+    private var retryTimers: [String: Task<Void, Never>] = [:]
 
-    // Called from main thread when progress events happen.
     public var onProgressUpdate: (([String: Any]) -> Void)?
 
     private override init() {}
@@ -113,15 +170,69 @@ public actor BackgroundDownloader: NSObject {
         config.sessionSendsLaunchEvents = true
         config.allowsCellularAccess = true
         config.waitsForConnectivity = true
+        config.shouldUseExtendedBackgroundIdleMode = true
         urlSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+
+        // Restore persisted downloads
+        Task { await restoreTasks() }
     }
 
-    /// Register a callback to receive progress updates. Called by ChannelBridge.
+    /// Restore previously persisted tasks on app launch.
+    private func restoreTasks() {
+        let persisted = DownloadPersistence.shared.loadAll()
+        for record in persisted {
+            guard record.status != "completed" && record.status != "cancelled" else { continue }
+            let destPath = record.destinationPath
+            let task = DXDownloadTask(
+                taskId: record.taskId,
+                url: record.url,
+                fileName: record.fileName,
+                destinationPath: destPath
+            )
+            task.totalBytes = record.totalBytes
+            task.receivedBytes = record.receivedBytes
+            task.etag = record.etag
+            task.status = .paused
+            task.retryCount = record.retryCount
+            task.category = record.category
+            task.headers = record.headers
+            task.resumeData = record.resumeData
+            tasks[record.taskId] = task
+            broadcastUpdate(task: task)
+            logger.info("Restored task: \(record.fileName) (\(record.status))")
+        }
+    }
+
     public func configureProgressCallback(_ callback: @escaping ([String: Any]) -> Void) {
         onProgressUpdate = callback
     }
 
-    /// Start a new download. Returns the task ID.
+    // MARK: - Analyze URL before download
+
+    /// Perform HEAD request to analyze a URL. Returns metadata map.
+    public func analyzeURL(urlString: String, headers: [String: String]? = nil) async -> [String: Any] {
+        guard let url = URL(string: urlString) else { return [:] }
+        let meta = await URLMetadataAnalyzer.shared.analyze(url: url, headers: headers)
+        return [
+            "fileName": meta.fileName,
+            "mimeType": meta.mimeType,
+            "fileExtension": meta.fileExtension,
+            "fileSize": meta.fileSize,
+            "supportsResume": meta.supportsResume,
+            "supportsRange": meta.supportsRange,
+            "contentDisposition": meta.contentDisposition,
+            "server": meta.server,
+            "etag": meta.etag,
+            "lastModified": meta.lastModified,
+            "finalURL": meta.finalURL,
+            "statusCode": meta.statusCode,
+            "acceptRanges": meta.acceptRanges,
+        ]
+    }
+
+    // MARK: - Start / Queue / Pause / Resume / Cancel
+
+    /// Start a download. If the concurrent limit is reached, it's queued.
     @discardableResult
     public func startDownload(url urlString: String,
                               fileName: String,
@@ -138,29 +249,60 @@ public actor BackgroundDownloader: NSObject {
             fileName: fileName,
             destinationPath: destPath
         )
+        task.headers = headers
         tasks[taskId] = task
 
+        // Persist immediately
+        persistTask(task)
+
+        // Check if we can start immediately or need to queue
+        let activeCount = tasks.values.filter { $0.status == .downloading || $0.status == .connecting }.count
+        let maxConcurrent = DownloadQueueManager.shared.maxConcurrent
+
+        if activeCount < maxConcurrent {
+            beginDownload(task: task, url: url)
+        } else {
+            task.status = .queued
+            broadcastUpdate(task: task)
+            persistTask(task)
+            logger.info("Queued: \(fileName) (active: \(activeCount)/\(maxConcurrent))")
+        }
+
+        return taskId
+    }
+
+    private func beginDownload(task: DXDownloadTask, url: URL) {
+        task.status = .connecting
+        broadcastUpdate(task: task)
+
         var request = URLRequest(url: url)
-        headers?.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        request.timeoutInterval = 60
+        task.headers?.forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
         let sessionTask = urlSession.downloadTask(with: request)
-        sessionTaskToTaskId[sessionTask.taskIdentifier] = taskId
+        sessionTaskToTaskId[sessionTask.taskIdentifier] = task.taskId
         task.status = .downloading
         sessionTask.resume()
-
-        logger.info("Started download: \(taskId) -> \(urlString)")
-        return taskId
+        persistTask(task)
+        logger.info("Started download: \(task.fileName)")
     }
 
     public func pauseDownload(taskId: String) {
         guard let dxTask = tasks[taskId] else { return }
+
+        // If queued, just mark as paused
+        if dxTask.status == .queued {
+            dxTask.status = .paused
+            broadcastUpdate(task: dxTask)
+            persistTask(dxTask)
+            return
+        }
+
         guard let sessionTaskId = sessionTaskToTaskId.first(where: { $0.value == taskId })?.key else { return }
 
         urlSession.getAllTasks { [weak self] sessionTasks in
             Task {
-                await self?.doPause(sessionTasks: sessionTasks,
-                                   sessionTaskId: sessionTaskId,
-                                   dxTask: dxTask)
+                await self?.doPause(sessionTasks: sessionTasks, sessionTaskId: sessionTaskId, dxTask: dxTask)
             }
         }
     }
@@ -173,46 +315,198 @@ public actor BackgroundDownloader: NSObject {
             }
         }
         dxTask.status = .paused
+        retryTimers[dxTask.taskId]?.cancel()
         broadcastUpdate(task: dxTask)
+        persistTask(dxTask)
     }
 
     private func saveResumeData(_ data: Data?, for taskId: String) {
         tasks[taskId]?.resumeData = data
+        if let task = tasks[taskId] {
+            persistTask(task)
+        }
     }
 
     public func resumeDownload(taskId: String) {
-        guard let dxTask = tasks[taskId], dxTask.status == .paused else { return }
+        guard let dxTask = tasks[taskId] else { return }
 
-        let sessionTask: URLSessionDownloadTask
-        if let resumeData = dxTask.resumeData {
-            sessionTask = urlSession.downloadTask(withResumeData: resumeData)
+        // If completed or already downloading, skip
+        if dxTask.status == .completed || dxTask.status == .downloading { return }
+
+        // Download from where we left off using resume data or range request
+        if let resumeData = dxTask.resumeData, dxTask.receivedBytes > 0 {
+            let sessionTask = urlSession.downloadTask(withResumeData: resumeData)
+            sessionTaskToTaskId[sessionTask.taskIdentifier] = taskId
+            dxTask.status = .downloading
+            dxTask.resumeData = nil
+            sessionTask.resume()
         } else {
             guard let url = URL(string: dxTask.url) else { return }
-            sessionTask = urlSession.downloadTask(with: url)
+
+            // Use Range header for resume when resume data not available
+            var request = URLRequest(url: url)
+            dxTask.headers?.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+
+            if dxTask.receivedBytes > 0 && dxTask.supportsResume {
+                let range = "bytes=\(dxTask.receivedBytes)-"
+                request.setValue(range, forHTTPHeaderField: "Range")
+            }
+
+            let sessionTask = urlSession.downloadTask(with: request)
+            sessionTaskToTaskId[sessionTask.taskIdentifier] = taskId
+            dxTask.status = .downloading
+            sessionTask.resume()
         }
-        sessionTaskToTaskId[sessionTask.taskIdentifier] = taskId
-        dxTask.status = .downloading
-        dxTask.resumeData = nil
-        sessionTask.resume()
+        broadcastUpdate(task: dxTask)
+        persistTask(dxTask)
     }
 
     public func cancelDownload(taskId: String) {
         guard let dxTask = tasks[taskId] else { return }
+
+        // Cancel retry timer
+        retryTimers[taskId]?.cancel()
+
         guard let sessionTaskId = sessionTaskToTaskId.first(where: { $0.value == taskId })?.key else {
             dxTask.status = .cancelled
+            broadcastUpdate(task: dxTask)
+            tasks.removeValue(forKey: taskId)
+            DownloadPersistence.shared.remove(taskId: taskId)
+            DownloadQueueManager.shared.taskDidFinish(taskId: taskId)
             return
         }
+
         urlSession.getAllTasks { sessionTasks in
             sessionTasks.first(where: { $0.taskIdentifier == sessionTaskId })?.cancel()
         }
         dxTask.status = .cancelled
-        tasks.removeValue(forKey: taskId)
         broadcastUpdate(task: dxTask)
+        tasks.removeValue(forKey: taskId)
+        DownloadPersistence.shared.remove(taskId: taskId)
+        sessionTaskToTaskId.removeValue(forKey: sessionTaskId)
+        DownloadQueueManager.shared.taskDidFinish(taskId: taskId)
     }
 
+    /// Refresh an expired/expiring download with a new URL.
+    public func refreshDownload(taskId: String, newURL: String) -> Bool {
+        guard let dxTask = tasks[taskId] else {
+            // Try from persistence
+            let persisted = DownloadPersistence.shared.loadAll()
+            guard let record = persisted.first(where: { $0.taskId == taskId }) else { return false }
+            // Re-create task with new URL
+            _ = startDownload(url: newURL, fileName: record.fileName, headers: record.headers)
+            DownloadPersistence.shared.remove(taskId: taskId)
+            return true
+        }
+
+        dxTask.status = .idle
+        dxTask.errorMessage = nil
+        _ = startDownload(url: newURL, fileName: dxTask.fileName,
+                          destinationPath: dxTask.destinationPath, headers: dxTask.headers)
+        return true
+    }
+
+    /// Get all active/paused/queued tasks.
     public func getActiveTasks() -> [[String: Any]] {
         tasks.values.map { $0.toDict() }
     }
+
+    /// Get list of all task IDs.
+    public func allTaskIds() -> [String] {
+        Array(tasks.keys)
+    }
+
+    /// Get download history from persistence.
+    public func getHistory() -> [[String: Any]] {
+        DownloadPersistence.shared.loadAll().map { record in
+            var dict: [String: Any] = [
+                "taskId": record.taskId,
+                "url": record.url,
+                "fileName": record.fileName,
+                "destinationPath": record.destinationPath,
+                "totalBytes": record.totalBytes,
+                "receivedBytes": record.receivedBytes,
+                "status": record.status,
+                "createdAt": ISO8601DateFormatter().string(from: record.createdAt),
+                "retryCount": record.retryCount,
+                "category": record.category,
+                "headers": record.headers as Any,
+            ]
+            if let completed = record.completedAt {
+                dict["completedAt"] = ISO8601DateFormatter().string(from: completed)
+            }
+            return dict
+        }
+    }
+
+    /// Clear download history, optionally deleting files.
+    public func clearHistory(deleteFiles: Bool) {
+        let all = DownloadPersistence.shared.loadAll()
+        for record in all {
+            if deleteFiles {
+                try? FileManager.default.removeItem(atPath: record.destinationPath)
+            }
+        }
+        DownloadPersistence.shared.saveAll([])
+    }
+
+    // MARK: - Queue Management
+
+    public func getMaxConcurrent() -> Int {
+        DownloadQueueManager.shared.maxConcurrent
+    }
+
+    public func setMaxConcurrent(_ count: Int) {
+        DownloadQueueManager.shared.setMaxConcurrent(count)
+    }
+
+    // MARK: - Retry
+
+    /// Retry a failed download with exponential backoff.
+    public func retryDownload(taskId: String) {
+        guard let dxTask = tasks[taskId], dxTask.status == .failed else { return }
+        dxTask.retryCount += 1
+        let delay = min(pow(2.0, Double(dxTask.retryCount)) * 2.0, 60.0) // 2, 4, 8, 16, 32, 60 max
+
+        dxTask.status = .retrying
+        broadcastUpdate(task: dxTask)
+        persistTask(dxTask)
+        logger.info("Retry \(dxTask.retryCount) for \(dxTask.fileName) in \(delay)s")
+
+        retryTimers[taskId] = Task {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            guard let task = self.tasks[taskId], task.status == .retrying else { return }
+            guard let url = URL(string: task.url) else { return }
+            self.beginDownload(task: task, url: url)
+        }
+    }
+
+    // MARK: - Persistence Helper
+
+    private func persistTask(_ task: DXDownloadTask) {
+        let record = PersistedDownload(
+            taskId: task.taskId,
+            url: task.url,
+            fileName: task.fileName,
+            destinationPath: task.destinationPath,
+            totalBytes: task.totalBytes,
+            receivedBytes: task.receivedBytes,
+            etag: task.etag,
+            lastModified: "",
+            status: task.statusString(),
+            createdAt: task.createdAt,
+            completedAt: task.completedAt,
+            resumeData: task.resumeData,
+            chunkPaths: [],
+            headers: task.headers,
+            retryCount: task.retryCount,
+            category: task.category
+        )
+        DownloadPersistence.shared.upsert(record)
+    }
+
+    // MARK: - Progress Broadcasting
 
     private func broadcastUpdate(task: DXDownloadTask) {
         let dict = task.toDict()
@@ -221,9 +515,8 @@ public actor BackgroundDownloader: NSObject {
         }
     }
 
-    /// Returns a path inside Documents/DirXplore/ so files appear under the app's
-    /// folder in the Files app ("On My iPhone" → "DirXplore Pro").
-    private static func defaultDestination(for fileName: String) -> String {
+    /// Returns a path inside Documents/DirXplore Pro/ so files appear under the app's folder.
+    public static func defaultDestination(for fileName: String) -> String {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let appFolder = docs.appendingPathComponent("DirXplore Pro", isDirectory: true)
         try? FileManager.default.createDirectory(at: appFolder, withIntermediateDirectories: true)
@@ -232,6 +525,7 @@ public actor BackgroundDownloader: NSObject {
 }
 
 // MARK: - URLSessionDownloadDelegate
+
 extension BackgroundDownloader: URLSessionDownloadDelegate, @unchecked Sendable {
 
     public nonisolated func urlSession(_ session: URLSession,
@@ -246,6 +540,9 @@ extension BackgroundDownloader: URLSessionDownloadDelegate, @unchecked Sendable 
         guard let taskId = sessionTaskToTaskId[downloadTask.taskIdentifier],
               let dxTask = tasks[taskId] else { return }
 
+        // If task was cancelled, don't save
+        if dxTask.status == .cancelled { return }
+
         let destURL = URL(fileURLWithPath: dxTask.destinationPath)
         do {
             try FileManager.default.createDirectory(
@@ -255,16 +552,21 @@ extension BackgroundDownloader: URLSessionDownloadDelegate, @unchecked Sendable 
                 try FileManager.default.removeItem(at: destURL)
             }
             try FileManager.default.moveItem(at: location, to: destURL)
+
             dxTask.status = .completed
             dxTask.progress = 1.0
-            logger.info("Completed: \(taskId)")
+            dxTask.completedAt = Date()
+            logger.info("Completed: \(taskId) -> \(dxTask.fileName)")
         } catch {
             dxTask.status = .failed
             dxTask.errorMessage = error.localizedDescription
             logger.error("Failed to move file: \(error)")
         }
+
         broadcastUpdate(task: dxTask)
+        persistTask(dxTask)
         sessionTaskToTaskId.removeValue(forKey: downloadTask.taskIdentifier)
+        DownloadQueueManager.shared.taskDidFinish(taskId: taskId)
     }
 
     public nonisolated func urlSession(_ session: URLSession,
@@ -285,6 +587,7 @@ extension BackgroundDownloader: URLSessionDownloadDelegate, @unchecked Sendable 
               let dxTask = tasks[taskId] else { return }
         dxTask.recordProgress(receivedBytes: received, totalBytes: total)
         broadcastUpdate(task: dxTask)
+        // Persist periodically (every 5% or every 2 seconds throttled by the broadcast)
     }
 
     public nonisolated func urlSession(_ session: URLSession,
@@ -300,17 +603,63 @@ extension BackgroundDownloader: URLSessionDownloadDelegate, @unchecked Sendable 
         guard let taskId = sessionTaskToTaskId[taskIdentifier],
               let dxTask = tasks[taskId] else { return }
 
-        // Check for resume data (paused by user — not a true error)
         let nsError = error as NSError
+
+        // Check for resume data (paused by user)
         if let resumeData = nsError.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
             dxTask.resumeData = resumeData
             dxTask.status = .paused
+            persistTask(dxTask)
+            broadcastUpdate(task: dxTask)
+            return
+        }
+
+        // Check for cancellation
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            if dxTask.status == .cancelled { return }
+            dxTask.status = .paused
+            broadcastUpdate(task: dxTask)
+            persistTask(dxTask)
+            return
+        }
+
+        // Determine if we should retry
+        let shouldRetry = dxTask.retryCount < maxRetries && isRetryable(nsError)
+
+        if shouldRetry {
+            dxTask.errorMessage = error.localizedDescription
+            broadcastUpdate(task: dxTask)
+            // Schedule automatic retry
+            Task {
+                await self.retryDownload(taskId: taskId)
+            }
         } else {
             dxTask.status = .failed
             dxTask.errorMessage = error.localizedDescription
-            logger.error("Download error: \(error)")
+            logger.error("Download error: \(error.localizedDescription)")
+            broadcastUpdate(task: dxTask)
+            persistTask(dxTask)
+            sessionTaskToTaskId.removeValue(forKey: taskIdentifier)
+            DownloadQueueManager.shared.taskDidFinish(taskId: taskId)
         }
-        broadcastUpdate(task: dxTask)
+    }
+
+    private func isRetryable(_ error: NSError) -> Bool {
+        switch error.code {
+        case NSURLErrorTimedOut,
+             NSURLErrorNetworkConnectionLost,
+             NSURLErrorNotConnectedToInternet,
+             NSURLErrorCancelled:
+            return true
+        default:
+            // Check for 5xx status codes (captured in the error description)
+            if let description = error.userInfo[NSLocalizedDescriptionKey] as? String {
+                if description.contains("5") || description.contains("503") || description.contains("502") {
+                    return true
+                }
+            }
+            return false
+        }
     }
 
     public nonisolated func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {

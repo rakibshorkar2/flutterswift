@@ -25,7 +25,6 @@ final class ChannelBridge: NSObject {
     private func setupDownloaderChannel() {
         let messenger = flutterEngine.binaryMessenger
 
-        // Method channel
         let methodChannel = FlutterMethodChannel(
             name: "com.dirxplorerakib.pro/downloader",
             binaryMessenger: messenger
@@ -36,14 +35,12 @@ final class ChannelBridge: NSObject {
             }
         }
 
-        // Event channel for progress
         let eventChannel = FlutterEventChannel(
             name: "com.dirxplorerakib.pro/downloader/progress",
             binaryMessenger: messenger
         )
         eventChannel.setStreamHandler(DownloadProgressHandler.shared)
 
-        // Wire progress updates to the event channel sink
         Task {
             await BackgroundDownloader.shared.configureProgressCallback { dict in
                 DispatchQueue.main.async {
@@ -56,14 +53,17 @@ final class ChannelBridge: NSObject {
     @MainActor
     private func handleDownloaderMethod(call: FlutterMethodCall, result: @escaping FlutterResult) async {
         let args = call.arguments as? [String: Any]
+        let downloader = BackgroundDownloader.shared
+
         switch call.method {
+        // --- Existing methods ---
         case "startDownload":
             guard let url = args?["url"] as? String,
                   let fileName = args?["fileName"] as? String else {
                 result(FlutterError(code: "INVALID_ARGS", message: "url and fileName required", details: nil))
                 return
             }
-            let taskId = await BackgroundDownloader.shared.startDownload(
+            let taskId = await downloader.startDownload(
                 url: url,
                 fileName: fileName,
                 destinationPath: args?["destinationPath"] as? String,
@@ -73,22 +73,72 @@ final class ChannelBridge: NSObject {
 
         case "pauseDownload":
             guard let taskId = args?["taskId"] as? String else { result(nil); return }
-            await BackgroundDownloader.shared.pauseDownload(taskId: taskId)
+            await downloader.pauseDownload(taskId: taskId)
             result(nil)
 
         case "resumeDownload":
             guard let taskId = args?["taskId"] as? String else { result(nil); return }
-            await BackgroundDownloader.shared.resumeDownload(taskId: taskId)
+            await downloader.resumeDownload(taskId: taskId)
             result(nil)
 
         case "cancelDownload":
             guard let taskId = args?["taskId"] as? String else { result(nil); return }
-            await BackgroundDownloader.shared.cancelDownload(taskId: taskId)
+            await downloader.cancelDownload(taskId: taskId)
             result(nil)
 
         case "getActiveTasks":
-            let tasks = await BackgroundDownloader.shared.getActiveTasks()
+            let tasks = await downloader.getActiveTasks()
             result(tasks)
+
+        // --- New analysis method ---
+        case "analyzeURL":
+            guard let url = args?["url"] as? String else {
+                result([:]); return
+            }
+            let meta = await downloader.analyzeURL(
+                urlString: url,
+                headers: args?["headers"] as? [String: String]
+            )
+            result(meta)
+
+        // --- Retry ---
+        case "retryDownload":
+            guard let taskId = args?["taskId"] as? String else { result(nil); return }
+            await downloader.retryDownload(taskId: taskId)
+            result(nil)
+
+        // --- Refresh with new URL ---
+        case "refreshDownload":
+            guard let taskId = args?["taskId"] as? String,
+                  let newURL = args?["newURL"] as? String else {
+                result(false); return
+            }
+            let success = await downloader.refreshDownload(taskId: taskId, newURL: newURL)
+            result(success)
+
+        // --- History ---
+        case "getHistory":
+            let history = await downloader.getHistory()
+            result(history)
+
+        case "clearHistory":
+            let deleteFiles = args?["deleteFiles"] as? Bool ?? false
+            await downloader.clearHistory(deleteFiles: deleteFiles)
+            result(nil)
+
+        // --- Queue / Concurrency ---
+        case "getMaxConcurrent":
+            let max = await downloader.getMaxConcurrent()
+            result(max)
+
+        case "setMaxConcurrent":
+            let count = args?["count"] as? Int ?? 2
+            await downloader.setMaxConcurrent(count)
+            result(nil)
+
+        case "allTaskIds":
+            let ids = await downloader.allTaskIds()
+            result(ids)
 
         default:
             result(FlutterMethodNotImplemented)
